@@ -22,15 +22,12 @@ add_executable(game_server
 	src/model.h
 	src/model.cpp
 	src/tagged.h
+	src/boost_json.cpp
 	src/json_loader.h
 	src/json_loader.cpp
 	src/request_handler.cpp
 	src/request_handler.h
-	src/json_converter.cpp
-	src/json_converter.h
-	src/responce_storage.cpp
-	src/responce_storage.h
+	src/json_helper.h
+	src/json_helper.cpp
 )
-target_link_libraries(game_server PRIVATE Threads::Threads jsoncpp)
-# Boost.Beast будет использовать std::string_view вместо boost::string_view
-add_compile_definitions(BOOST_BEAST_USE_STD_STRING_VIEW)
+target_link_libraries(game_server PRIVATE Threads::Threads)

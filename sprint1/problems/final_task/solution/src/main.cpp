@@ -10,21 +10,33 @@
 
 using namespace std::literals;
 namespace net = boost::asio;
-namespace sys = boost::system;
+namespace sys = http_server::sys;
 
 namespace {
 
 // Запускает функцию fn на n потоках, включая текущий
 template <typename Fn>
-void RunWorkers(size_t n, const Fn& fn) {
-    n = std::max(static_cast<size_t>(1), n);
-    std::vector<std::jthread> workers;
-    workers.reserve(n - 1);
+void RunWorkers(unsigned workersCount, const Fn& fn) {
+    workersCount = std::max(1u, workersCount);
+
+    #ifdef __clang__
+        std::vector<std::thread> workers;
+    #else
+        std::vector<std::jthread> workers;
+    #endif
+
+    workers.reserve(workersCount - 1);
     // Запускаем n-1 рабочих потоков, выполняющих функцию fn
-    while (--n) {
+    while (--workersCount) {
         workers.emplace_back(fn);
     }
     fn();
+
+    #ifdef __clang__
+        for (auto& worker : workers) {
+            worker.join();
+        }
+    #endif
 }
 
 }  // namespace
@@ -36,18 +48,20 @@ int main(int argc, const char* argv[]) {
     }
     try {
         // 1. Загружаем карту из файла и построить модель игры
+        //std::string path = "/Users/balovdmitry/Desktop/SB/cpp-backend-practicum/sprint1/problems/map_json/precode/data/config.json";
+        //model::Game game = json_loader::LoadGame(path);
         model::Game game = json_loader::LoadGame(argv[1]);
-        //model::Game game = json_loader::LoadGame("../../data/config.json"); // for debug
 
         // 2. Инициализируем io_context
-        const unsigned num_threads = std::thread::hardware_concurrency();
-        net::io_context ioc(num_threads);
+        const unsigned numThreads = std::thread::hardware_concurrency();
+        net::io_context ioc(numThreads);
 
         // 3. Добавляем асинхронный обработчик сигналов SIGINT и SIGTERM
+            // Подписываемся на сигналы и при их получении завершаем работу сервера
         net::signal_set signals(ioc, SIGINT, SIGTERM);
-        signals.async_wait([&ioc](const sys::error_code& ec, [[maybe_unused]] int signal_number) {
+        signals.async_wait([&ioc](const sys::error_code& ec, [[maybe_unused]] int signalNumber) {
             if (!ec) {
-                std::cout << "Signal "sv << signal_number << " received"sv << std::endl;
+                std::cout << "Signal "sv << signalNumber << " received"sv << std::endl;
                 ioc.stop();
             }
         });
@@ -62,11 +76,12 @@ int main(int argc, const char* argv[]) {
             handler(std::forward<decltype(req)>(req), std::forward<decltype(send)>(send));
         });
         
+
         // Эта надпись сообщает тестам о том, что сервер запущен и готов обрабатывать запросы
         std::cout << "Server has started..."sv << std::endl;
 
         // 6. Запускаем обработку асинхронных операций
-        RunWorkers(std::max(1u, num_threads), [&ioc] {
+        RunWorkers(std::max(1u, numThreads), [&ioc] {
             ioc.run();
         });
     } catch (const std::exception& ex) {
