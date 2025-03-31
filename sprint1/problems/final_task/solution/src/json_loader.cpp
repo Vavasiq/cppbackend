@@ -13,10 +13,10 @@ int GetInt(std::string key, const json::object& obj){
     return static_cast<int>(obj.at(key).as_int64());
 }
 
-std::string GetString(std::string key, const json::object& obj){
-    std::string result = json::serialize(obj.at(key));
-    return result.substr(1, result.size() - 2);
+std::string GetString(const std::string& key, const json::object& obj){
+    return std::string(obj.at(key).as_string());
 }
+
 
 void AddRoadsFromJson(const json::object& json_map, Map& map){
     json::array json_roads = json_map.at("roads").as_array();
