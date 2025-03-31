@@ -81,8 +81,12 @@ model::Game LoadGame(const std::filesystem::path& json_path) {
     Game game;
 
     std::ifstream input_json(json_path);
+    if (!input_json) {
+        throw std::runtime_error("Failed to open JSON file");
+    }
     std::ostringstream json_stream;
     json_stream << input_json.rdbuf();
+
     AddMapsFromJson(json_stream.str(), game);
     return game;
 }
