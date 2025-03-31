@@ -163,7 +163,7 @@ private:
     Roads roads_;
     Buildings buildings_;
 
-    OfficeIdToIndex warehouse_id_to_index_;
+    OfficeIdToIndex office_id_to_index_;
     Offices offices_;
 };
 
