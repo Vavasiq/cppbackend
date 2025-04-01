@@ -8,6 +8,9 @@
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 #include <iostream>
+#include <memory>
+#include <utility>
+#include <type_traits>
 
 namespace http_server {
 
@@ -17,24 +20,20 @@ namespace beast = boost::beast;
 namespace sys = boost::system;
 namespace http = beast::http;
 
-// Объявление функции для вывода ошибок
 void ReportError(beast::error_code ec, std::string_view what);
 
 class SessionBase {
 public:
-    // Запрещаем копирование и присваивание объектов SessionBase и его наследников
+    // Запрещаем копирование и присваивание
     SessionBase(const SessionBase&) = delete;
     SessionBase& operator=(const SessionBase&) = delete;
 
-    // Объявление методов
     void Run();
 
 protected:
     using HttpRequest = http::request<http::string_body>;
-
     explicit SessionBase(tcp::socket&& socket);
 
-    // Шаблонный метод можно оставить в заголовке, так как он определяется на этапе компиляции
     template <typename Body, typename Fields>
     void Write(http::response<Body, Fields>&& response) {
         auto safe_response = std::make_shared<http::response<Body, Fields>>(std::move(response));
@@ -48,23 +47,20 @@ protected:
     ~SessionBase();
 
 private:
-    // Объявления не шаблонных методов, реализация которых находится в http_server.cpp
+    // Объявления не шаблонных методов (реализации в http_server.cpp)
     void Read();
     void OnRead(beast::error_code ec, std::size_t bytes_read);
     void OnWrite(bool close, beast::error_code ec, std::size_t bytes_written);
     void Close();
 
-    // Чисто виртуальные функции, требуемые для работы класса
     virtual void HandleRequest(HttpRequest&& request) = 0;
     virtual std::shared_ptr<SessionBase> GetSharedThis() = 0;
 
-    // Члены класса
     beast::tcp_stream stream_;
     beast::flat_buffer buffer_;
     HttpRequest request_;
 };
 
-// Шаблонный класс Session (реализация методов шаблонов оставляем в заголовке)
 template <typename RequestHandler>
 class Session : public SessionBase, public std::enable_shared_from_this<Session<RequestHandler>> {
 public:
@@ -73,34 +69,65 @@ public:
         : SessionBase(std::move(socket))
         , request_handler_(std::forward<Handler>(request_handler)) {
     }
-
 private:
-    void HandleRequest(HttpRequest&& request) override;
-    std::shared_ptr<SessionBase> GetSharedThis() override;
+    void HandleRequest(HttpRequest&& request) override {
+        request_handler_(std::move(request), [self = this->shared_from_this()](auto&& response) {
+            self->Write(std::move(response));
+        });
+    }
+    std::shared_ptr<SessionBase> GetSharedThis() override {
+        return this->shared_from_this();
+    }
     RequestHandler request_handler_;
 };
 
-// Шаблонный класс Listener
 template <typename RequestHandler>
 class Listener : public std::enable_shared_from_this<Listener<RequestHandler>> {
 public:
     template <typename Handler>
-    Listener(net::io_context& ioc, const tcp::endpoint& endpoint, Handler&& request_handler);
+    Listener(net::io_context& ioc, const tcp::endpoint& endpoint, Handler&& request_handler)
+        : ioc_(ioc)
+        , acceptor_(net::make_strand(ioc))
+        , request_handler_(std::forward<Handler>(request_handler)) {
+            acceptor_.open(endpoint.protocol());
+            acceptor_.set_option(net::socket_base::reuse_address(true));
+            acceptor_.bind(endpoint);
+            acceptor_.listen(net::socket_base::max_listen_connections);
+    }
 
-    void Run();
+    void Run() {
+        DoAccept();
+    }
 
 private:
-    void DoAccept();
-    void OnAccept(sys::error_code ec, tcp::socket socket);
-    void AsyncRunSession(tcp::socket&& socket);
+    void DoAccept() {
+        acceptor_.async_accept(
+            net::make_strand(ioc_),
+            beast::bind_front_handler(&Listener::OnAccept, this->shared_from_this()));
+    }
+
+    void OnAccept(sys::error_code ec, tcp::socket socket) {
+        if (ec) {
+            ReportError(ec, "accept");
+        } else {
+            AsyncRunSession(std::move(socket));
+        }
+        DoAccept();
+    }
+
+    void AsyncRunSession(tcp::socket&& socket) {
+        std::make_shared<Session<RequestHandler>>(std::move(socket), request_handler_)->Run();
+    }
 
     net::io_context& ioc_;
     tcp::acceptor acceptor_;
     RequestHandler request_handler_;
 };
 
-// Шаблонная функция ServeHttp
 template <typename RequestHandler>
-void ServeHttp(net::io_context& ioc, const tcp::endpoint& endpoint, RequestHandler&& handler);
+void ServeHttp(net::io_context& ioc, const tcp::endpoint& endpoint, RequestHandler&& handler) {
+    using MyListener = Listener<std::decay_t<RequestHandler>>;
+    std::make_shared<MyListener>(ioc, endpoint, std::forward<RequestHandler>(handler))->Run();
+}
 
-}  // namespace http_server
+} // namespace http_server
