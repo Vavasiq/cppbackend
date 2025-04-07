@@ -1,17 +1,14 @@
 #include "http_server.h"
+#include <chrono>
 
 namespace http_server {
-
-void ReportError(beast::error_code ec, std::string_view what) {
-    using namespace std::literals;
-    std::cerr << what << ": "sv << ec.message() << std::endl;
-}
 
 SessionBase::SessionBase(tcp::socket&& socket)
     : stream_(std::move(socket)) {
 }
 
-SessionBase::~SessionBase() = default;
+SessionBase::~SessionBase() {
+}
 
 void SessionBase::Run() {
     net::dispatch(stream_.get_executor(),
@@ -32,20 +29,15 @@ void SessionBase::OnRead(beast::error_code ec, std::size_t bytes_read) {
         return Close();
     }
     if (ec) {
+        LOG_ERROR(ec.value(), ec.message(), "read");
         return ReportError(ec, "read"sv);
     }
+    std::string ip(stream_.socket().remote_endpoint().address().to_string());
+    std::string url(request_.target());
+    std::string method(request_.method_string());
+    LOG_REQUEST_RECEIVED(ip, url, method);
+    response_timer_.Start();
     HandleRequest(std::move(request_));
-}
-
-void SessionBase::OnWrite(bool close, beast::error_code ec, std::size_t bytes_written) {
-    using namespace std::literals;
-    if (ec) {
-        return ReportError(ec, "write"sv);
-    }
-    if (close) {
-        return Close();
-    }
-    Read();
 }
 
 void SessionBase::Close() {
@@ -54,4 +46,4 @@ void SessionBase::Close() {
     ReportError(ec, "close");
 }
 
-} // namespace http_server
+}  // namespace http_server
