@@ -25,7 +25,7 @@ inline void ReportError(beast::error_code ec, std::string_view what) {
 
 class SessionBase {
 public:
-    // Запрещаем копирование и присваивание объектов SessionBase и его наследников
+
     SessionBase(const SessionBase&) = delete;
     SessionBase& operator=(const SessionBase&) = delete;
 
@@ -42,7 +42,7 @@ protected:
         auto self = GetSharedThis();
         http::async_write(stream_, *safe_response,
                           [safe_response, self](beast::error_code ec, std::size_t bytes_written) {
-                              self->OnWrite(safe_response, ec, bytes_written);
+                              self->OnWrite<Body, Fields>(safe_response, ec, bytes_written);
                           });
     }
     virtual ~SessionBase();
