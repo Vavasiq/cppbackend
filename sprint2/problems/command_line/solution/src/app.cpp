@@ -126,6 +126,7 @@ model::Dog::Position GameUseCase::GetFirstPos(const model::Map::Roads& roads) {
 }
 
 model::Dog::Position GameUseCase::GetRandomPos(const model::Map::Roads& roads) {
+    static std::minstd_rand rng{std::random_device{}()};
     auto random_num = [](int a, int b) -> int {
         std::uniform_int_distribution<int> dist(a, b - 1);
         return dist(rng);
