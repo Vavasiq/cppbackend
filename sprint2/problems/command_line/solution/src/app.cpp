@@ -120,12 +120,12 @@ std::string GameUseCase::JoinGame(const std::string& user_name, const std::strin
     return json::serialize(json_body);   
 }
 
-static model::Dog::Position GetFirstPos(const model::Map::Roads& roads) {
+model::Dog::Position GetFirstPos(const model::Map::Roads& roads) {
     const Point& pos = roads.begin()->GetStart();
     return model::Dog::Position({static_cast<double>(pos.x), static_cast<double>(pos.y)});
 }
 
-static model::Dog::Position GetRandomPos(const model::Map::Roads& roads) {
+model::Dog::Position GetRandomPos(const model::Map::Roads& roads) {
     static std::minstd_rand rng{std::random_device{}()};
     auto random_num = [&rng](int a, int b) -> int {
         std::uniform_int_distribution<int> dist(a, b - 1);
