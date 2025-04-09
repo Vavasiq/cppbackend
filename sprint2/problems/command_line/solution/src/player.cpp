@@ -4,10 +4,10 @@
 namespace util {
 
 size_t DogMapKeyHasher::operator()(const DogMapKey& value) const{
+    constexpr size_t kNum = 37;
     size_t h1 = static_cast<size_t>(value.first);
     size_t h2 = util::TaggedHasher<model::Map::Id>()(value.second);
-
-    return h1 * 37 + h2 * 37 * 37;
+    return h1 * kNum + h2 * kNum * kNum;
 }
 
 } // namespace util
