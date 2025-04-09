@@ -245,7 +245,7 @@ private:
     /* Обработка горизонтальных дорог по y координате*/
     void FindInHorizontals(const Dog::Position& pos, std::vector<const Road*>& roads) const;
 
-    static bool CheckBounds(ConstRoadIt it, const Dog::Position& pos) const;
+    static bool CheckBounds(ConstRoadIt it, const Dog::Position& pos);
 
     Id id_;
     std::string name_;
