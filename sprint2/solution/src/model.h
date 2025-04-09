@@ -245,7 +245,7 @@ private:
     /* Обработка горизонтальных дорог по y координате*/
     void FindInHorizontals(const Dog::Position& pos, std::vector<const Road*>& roads) const;
 
-    bool CheckBounds(ConstRoadIt it, const Dog::Position& pos) const;
+    static bool CheckBounds(ConstRoadIt it, const Dog::Position& pos);
 
     Id id_;
     std::string name_;
@@ -293,9 +293,9 @@ public:
 
     void AddMap(Map&& map);
 
-    GameSession* AddSession(const Map::Id& map);
+    GameSession* AddSession(const Map::Id& mapId);
 
-    GameSession* SessionIsExists(const Map::Id& id);
+    GameSession* SessionIsExists(const Map::Id& mapId);
 
     void SetDefaultDogSpeed(double new_speed);
 

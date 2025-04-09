@@ -62,10 +62,14 @@ void SessionBase::OnWrite(std::shared_ptr<http::response<Body, Fields>> safe_res
     Read();
 }
 
-template void SessionBase::OnWrite<http::basic_string_body<char, std::char_traits<char>, std::allocator<char>>, http::basic_fields<std::allocator<char>>>
-    (std::shared_ptr<http::response<http::basic_string_body<char, std::char_traits<char>, std::allocator<char>>, http::basic_fields<std::allocator<char>>>>, beast::error_code, std::size_t);
+using StringBody = http::basic_string_body<char>;
+using Fields = http::basic_fields<std::allocator<char>>;
+using FileBody = http::basic_file_body<beast::file_posix>;
 
-template void SessionBase::OnWrite<http::basic_file_body<beast::file_posix>, http::basic_fields<std::allocator<char>>>
-    (std::shared_ptr<http::response<http::basic_file_body<beast::file_posix>, http::basic_fields<std::allocator<char>>>>, beast::error_code, std::size_t);
+template void SessionBase::OnWrite<StringBody, Fields>(
+    std::shared_ptr<http::response<StringBody, Fields>>, beast::error_code, std::size_t);
+
+template void SessionBase::OnWrite<FileBody, Fields>(
+    std::shared_ptr<http::response<FileBody, Fields>>, beast::error_code, std::size_t);
 
 }  // namespace http_server

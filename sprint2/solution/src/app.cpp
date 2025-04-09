@@ -100,7 +100,8 @@ std::string GameUseCase::JoinGame(const std::string& user_name, const std::strin
     }
 
     model::Dog::Name dog_name(user_name);
-    model::Dog::Position dog_pos = (random_spawn) ? GetRandomPos(game.FindMap(map_id)->GetRoads()) : GetFirstPos(game.FindMap(map_id)->GetRoads());
+    model::Dog::Position dog_pos = (random_spawn) ? GameUseCase::GetRandomPos(game.FindMap(map_id)->GetRoads())
+                                                  : GameUseCase::GetFirstPos(game.FindMap(map_id)->GetRoads());
     model::Dog::Speed dog_speed({0, 0});
     model::Direction dog_dir = model::Direction::NORTH;
 
@@ -119,21 +120,22 @@ std::string GameUseCase::JoinGame(const std::string& user_name, const std::strin
     return json::serialize(json_body);   
 }
 
- model::Dog::Position GameUseCase::GetFirstPos(const model::Map::Roads& roads) const{
+model::Dog::Position GameUseCase::GetFirstPos(const model::Map::Roads& roads) {
     const Point& pos = roads.begin()->GetStart();
     return model::Dog::Position({static_cast<double>(pos.x), static_cast<double>(pos.y)});
 }
 
- model::Dog::Position GameUseCase::GetRandomPos(const model::Map::Roads& roads) const{
-    auto random_num = [](int a, int b){
-        return a + rand()%(b-a);
+model::Dog::Position GameUseCase::GetRandomPos(const model::Map::Roads& roads) {
+    static std::minstd_rand rng{std::random_device{}()};
+    auto random_num = [](int a, int b) -> int {
+        std::uniform_int_distribution<int> dist(a, b - 1);
+        return dist(rng);
     };
 
-    model::Map::RoadTag tag = model::Map::RoadTag(random_num(0, 2));
     size_t road_index = random_num(0, roads.size());
-    const model::Road& road = *(roads.begin());
-    double x = 0;
-    double y = 0;
+    const model::Road& road = roads[road_index];
+    int x = 0;
+    int y = 0;
     if(road.IsHorizontal()){
         x = random_num(road.GetStart().x, road.GetEnd().x);
         y = road.GetStart().y;
@@ -141,7 +143,7 @@ std::string GameUseCase::JoinGame(const std::string& user_name, const std::strin
         x = road.GetStart().x;
         y = random_num(road.GetStart().y, road.GetEnd().y);
     }
-    return model::Dog::Position({x,y});
+    return model::Dog::Position({static_cast<double>(x), static_cast<double>(y)});
 }
 
 std::string GameUseCase::GetGameState() const{
