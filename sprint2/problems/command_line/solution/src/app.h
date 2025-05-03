@@ -42,8 +42,8 @@ public:
 
     std::string IncreaseTime(double delta, model::Game& game);
 private:
-    model::Dog::Position GetFirstPos(const model::Map::Roads& roads) const;
-    model::Dog::Position GetRandomPos(const model::Map::Roads& roads) const;
+    static model::Dog::Position GetFirstPos(const model::Map::Roads& roads);
+    static model::Dog::Position GetRandomPos(const model::Map::Roads& roads);
     int auto_counter_ = 0;
     model::Players& players_;
     model::PlayerTokens& tokens_;

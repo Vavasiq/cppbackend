@@ -6,6 +6,10 @@
 namespace model {
 using namespace std::literals;
 
+namespace {
+    constexpr double kRoadOffset = 0.4;
+}
+
 /* ------------------------ Map ----------------------------------- */
 
 const Map::Id& Map::GetId() const noexcept {
@@ -120,14 +124,14 @@ void Map::FindInHorizontals(const Dog::Position& pos, std::vector<const Road*>& 
     }
 }
 
-bool Map::CheckBounds(ConstRoadIt it, const Dog::Position& pos) const{
+bool Map::CheckBounds(ConstRoadIt it, const Dog::Position& pos){
     Point start = it->second.GetStart();
     Point end = it->second.GetEnd();
     if(it->second.IsInvert()){
         std::swap(start, end);
     }
-    return ((start.x - 0.4 <= (*pos).x && (*pos).x <= end.x + 0.4) && 
-                (start.y - 0.4 <= (*pos).y && (*pos).y <= end.y + 0.4));
+    return ((start.x - kRoadOffset <= (*pos).x && (*pos).x <= end.x + kRoadOffset) && 
+                (start.y - kRoadOffset <= (*pos).y && (*pos).y <= end.y + kRoadOffset));
 }
 
 /* ------------------------ Game ----------------------------------- */
@@ -146,18 +150,18 @@ void Game::AddMap(Map&& map) {
     }
 }
 
-GameSession* Game::AddSession(const Map::Id& id){
-    if(const Map* map = FindMap(id); map != nullptr){
-        GameSession* session = &(map_id_to_sessions_[id].emplace_back(map));
+GameSession* Game::AddSession(const Map::Id& mapId){
+    if(const Map* map = FindMap(mapId); map != nullptr){
+        GameSession* session = &(map_id_to_sessions_[mapId].emplace_back(map));
         return session;
     }
     return nullptr;
 }
 
-GameSession* Game::SessionIsExists(const Map::Id& id){
-    if(const Map* map = FindMap(id); map != nullptr){
-        if(!map_id_to_sessions_[id].empty()){
-            GameSession* session = &(map_id_to_sessions_[id].back());
+GameSession* Game::SessionIsExists(const Map::Id& mapId){
+    if(const Map* map = FindMap(mapId); map != nullptr){
+        if(!map_id_to_sessions_[mapId].empty()){
+            GameSession* session = &(map_id_to_sessions_[mapId].back());
             return session;
         }
     }
@@ -224,16 +228,16 @@ void Game::UpdateDogPos(Dog& dog, const std::vector<const Road*>& roads, double 
             return;
         }
 
-        if(start.x - 0.4 >= getting_pos.x) {
-            result_pos.x = start.x - 0.4;
-        } else if(getting_pos.x >= end.x + 0.4){
-            result_pos.x = end.x + 0.4;
+        if(start.x - kRoadOffset >= getting_pos.x) {
+            result_pos.x = start.x - kRoadOffset;
+        } else if(getting_pos.x >= end.x + kRoadOffset){
+            result_pos.x = end.x + kRoadOffset;
         }
 
-        if(start.y - 0.4 >= getting_pos.y) {
-            result_pos.y = start.y - 0.4;
-        } else if(getting_pos.y >= end.y + 0.4){
-            result_pos.y = end.y + 0.4;
+        if(start.y - kRoadOffset >= getting_pos.y) {
+            result_pos.y = start.y - kRoadOffset;
+        } else if(getting_pos.y >= end.y + kRoadOffset){
+            result_pos.y = end.y + kRoadOffset;
         }
 
         collisions.insert(result_pos);

@@ -241,8 +241,8 @@ private:
                             "mapNotFound"sv, "Map not found"sv, req.version());
                     }
                     /* Запрос без ошибок */
-                    std::string body = app_.GetJoinGameResult(user_name, map_id);
-                    return MakeResponse(http::status::ok, body, req.version(), body.size(), 
+                    std::string join_response = app_.GetJoinGameResult(user_name, map_id);
+                    return MakeResponse(http::status::ok, join_response, req.version(), join_response.size(), 
                         "application/json"s);
                 }
                 return MakeErrorResponse(http::status::bad_request, 
@@ -286,9 +286,9 @@ private:
                 } else {
                     throw std::logic_error("Token is missing");
                 }
-            } catch(...){
+            } catch(const std::exception& ex){
                 return MakeErrorResponse(http::status::unauthorized, 
-                    "invalidToken"sv, "Authorization header is missing"sv, req.version());
+                    "invalidToken"sv, ex.what(), req.version());
             }
         }
 
