@@ -198,11 +198,15 @@ public:
     }
 
     void ClearBag() {
-        score_ += std::accumulate(
-            bag_->begin(), bag_->end(), 0u,
-            [](unsigned sum, const Loot& loot){ return sum + loot.value; }
+        auto& items = *bag_;  
+
+        score_ += std::accumulate( items.begin(), items.end(), 0u,
+            [](unsigned sum, const Loot& loot) {
+                return sum + loot.value;
+            }
         );
-        bag_->resize(0);
+        
+        items.resize(0);
     }
 
 
