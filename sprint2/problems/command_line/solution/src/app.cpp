@@ -3,6 +3,7 @@
 #include <iostream>
 #include <string>
 
+namespace app{
 namespace {
     // Константы для строковых кодов направлений
     constexpr const char* DIR_UP    = "U";
@@ -30,8 +31,6 @@ namespace {
         throw std::invalid_argument("Unknown direction code: " + s);
     }
 }
-
-namespace app{
 
 /* ------------------------ GetMapUseCase ----------------------------------- */
 
@@ -263,7 +262,7 @@ std::string GameUseCase::SetAction(const json::object& action, const Token& toke
     Direction new_dir;
     Dog::Speed new_speed({0, 0});
     
-    std::string move_code = action.at("move").as_string();
+    std::string move_code = action.at("move").as_string().c_str();
     Direction dir_enum = CharToDirection(move_code);
 
     switch(dir_enum) {
