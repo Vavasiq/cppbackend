@@ -41,7 +41,7 @@ public:
 
     std::string SetAction(const json::object& action, const Token& token);
 
-    std::string IncreaseTime(double delta, Game& game);
+    static std::string IncreaseTime(double delta, Game& game);
 
     static void GenerateLoot(detail::Milliseconds delta, Game& game);
 private:

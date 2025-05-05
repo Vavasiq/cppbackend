@@ -8,6 +8,8 @@
 #include <deque>
 #include <iostream>
 #include <optional>
+#include <numeric>
+#include <random>
 
 #include "geom.h"
 #include "tagged.h"
@@ -195,12 +197,18 @@ public:
         (*bag_).emplace_back(std::move(loot));
     }
 
-    void ClearBag(){
-        for(const Loot& loot : (*bag_)){
-            score_ += loot.value;
-        }
-        (*bag_).resize(0);
+    void ClearBag() {
+        auto& items = *bag_;  
+
+        score_ += std::accumulate( items.begin(), items.end(), 0u,
+            [](unsigned sum, const Loot& loot) {
+                return sum + loot.value;
+            }
+        );
+        
+        items.resize(0);
     }
+
 
     const Bag& GetBag() const{
         return bag_;
@@ -275,8 +283,15 @@ public:
 
     static PairDouble GetRandomPos(const model::Map::Roads& roads);
 private:
-    static unsigned GetRandomNumber(unsigned a, unsigned b){
-        return a + rand()%(b-a);
+    // Новый генератор
+    static unsigned GetRandomNumber(unsigned a, unsigned b) {
+        if (a >= b) {
+            return a;
+        }
+        
+        static thread_local std::minstd_rand rng{ std::random_device{}() };
+        std::uniform_int_distribution<unsigned> dist(a, b - 1);
+        return dist(rng);
     }
 
     using OfficeIdToIndex = std::unordered_map<Office::Id, size_t, util::TaggedHasher<Office::Id>>;

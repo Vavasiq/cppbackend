@@ -1,9 +1,36 @@
 #include "app.h"
 #include <stdexcept>
 #include <iostream>
-
+#include <string>
 
 namespace app{
+namespace {
+    // Константы для строковых кодов направлений
+    constexpr const char* DIR_UP    = "U";
+    constexpr const char* DIR_DOWN  = "D";
+    constexpr const char* DIR_LEFT  = "L";
+    constexpr const char* DIR_RIGHT = "R";
+
+    // Конвертация Direction в строковый код
+    static const char* DirectionToChar(Direction dir) {
+        switch (dir) {
+            case Direction::NORTH: return DIR_UP;
+            case Direction::SOUTH: return DIR_DOWN;
+            case Direction::WEST:  return DIR_LEFT;
+            case Direction::EAST:  return DIR_RIGHT;
+            default:               return "";
+        }
+    }
+
+    // Конвертация строкового кода в Direction
+    static Direction CharToDirection(const std::string& s) {
+        if (s == DIR_UP)    return Direction::NORTH;
+        if (s == DIR_DOWN)  return Direction::SOUTH;
+        if (s == DIR_LEFT)  return Direction::WEST;
+        if (s == DIR_RIGHT) return Direction::EAST;
+        throw std::invalid_argument("Unknown direction code: " + s);
+    }
+}
 
 /* ------------------------ GetMapUseCase ----------------------------------- */
 
@@ -191,23 +218,7 @@ json::object GameUseCase::GetPlayers(const PlayerTokens::PlayersInSession& playe
         player_attributes["speed"] = {speed.x, speed.y};
 
         Direction dir = player->GetDog()->GetDirection();
-        switch (dir)
-        {
-            case Direction::NORTH:
-                player_attributes["dir"] = "U";
-                break;
-            case Direction::SOUTH:
-                player_attributes["dir"] = "D";
-                break;
-            case Direction::WEST:
-                player_attributes["dir"] = "L";
-                break;
-            case Direction::EAST:
-                player_attributes["dir"] = "R";
-                break;
-            default:
-                player_attributes["dir"] = "Unknown";
-        }
+        player_attributes["dir"] = DirectionToChar(dir);
 
         player_attributes["bag"] = GetBagItems(player->GetDog()->GetBag());
         player_attributes["score"] = player->GetDog()->GetScore();
@@ -247,24 +258,37 @@ std::string GameUseCase::GetGameState(const Token& token) const{
 std::string GameUseCase::SetAction(const json::object& action, const Token& token){
     Player* player = tokens_.FindPlayerByToken(token);
     double dog_speed = player->GetSession()->GetMap()->GetDogSpeed();
+
     Direction new_dir;
-    Dog::Speed new_speed({0, 0});    
-    std::string dir = std::string(action.at("move").as_string());
-    if(dir == "U"){
-        new_speed = Dog::Speed({0, -dog_speed});
-        new_dir = Direction::NORTH;
-    } else if(dir == "D"){
-        new_speed = Dog::Speed({0, dog_speed});
-        new_dir = Direction::SOUTH;
-    } else if(dir == "L"){
-        new_speed = Dog::Speed({-dog_speed, 0});
-        new_dir = Direction::WEST;
-    } else if(dir == "R"){
-        new_speed = Dog::Speed({dog_speed, 0});
-        new_dir = Direction::EAST;
+    Dog::Speed new_speed({0, 0});
+    
+    std::string move_code = action.at("move").as_string().c_str();
+    Direction dir_enum = CharToDirection(move_code);
+
+    switch(dir_enum) {
+        case Direction::NORTH:
+            new_speed = Dog::Speed({0, -dog_speed});
+            new_dir   = Direction::NORTH;
+            break;
+        case Direction::SOUTH:
+            new_speed = Dog::Speed({0, dog_speed});
+            new_dir   = Direction::SOUTH;
+            break;
+        case Direction::WEST:
+            new_speed = Dog::Speed({-dog_speed, 0});
+            new_dir   = Direction::WEST;
+            break;
+        case Direction::EAST:
+            new_speed = Dog::Speed({dog_speed, 0});
+            new_dir   = Direction::EAST;
+            break;
+        default:
+            throw std::invalid_argument("Unknown direction code: " + move_code);
     }
+
     player->GetDog()->SetSpeed(new_speed);
     player->GetDog()->SetDirection(new_dir);
+    
     return "{}";
 }
 
