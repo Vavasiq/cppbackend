@@ -81,6 +81,8 @@ using Token = util::Tagged<std::string, detail::TokenTag>;
 
 class PlayerTokens{
 public:
+    using PlayersInSession = std::deque<const Player*>;
+
     PlayerTokens() = default;
 
     Token AddPlayer(Player& player);
@@ -88,6 +90,8 @@ public:
     Player* FindPlayerByToken(const Token& token); 
 
     const Player* FindPlayerByToken(const Token& token) const;
+
+    const PlayersInSession& GetPlayersBySession(const GameSession* session) const;
 private:
     Token GenerateToken();
     std::random_device random_device_;
@@ -106,6 +110,8 @@ private:
     // Вы можете поэкспериментировать с алгоритмом генерирования токенов,
     // чтобы сделать их подбор ещё более затруднительным
     std::unordered_map<Token, Player*, util::TaggedHasher<Token>> token_to_player_;
+    std::unordered_map<const model::GameSession*, PlayersInSession> players_by_session_;
+
 };
 
 } // namespace model

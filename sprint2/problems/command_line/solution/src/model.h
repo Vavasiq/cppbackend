@@ -1,40 +1,41 @@
 #pragma once
+#include <algorithm>
 #include <string>
 #include <unordered_map>
+#include <set>
 #include <map>
 #include <vector>
 #include <deque>
 #include <iostream>
+#include <optional>
+#include <numeric>
 
+#include "geom.h"
 #include "tagged.h"
+#include "loot_generator.h"
+#include "collision_detector.h"
 
 namespace model {
 
-using Dimension = int;
-using Coord = Dimension;
+namespace detail{
 
-struct Point {
-    Coord x, y;
-};
+using Milliseconds = std::chrono::milliseconds;
 
-struct Size {
-    Dimension width, height;
-};
+inline Milliseconds FromDouble(double delta){
+    return std::chrono::duration_cast<Milliseconds>(std::chrono::duration<double>(delta/1000));
+}   
 
-enum class Direction{
-    NORTH,
-    SOUTH,
-    WEST,
-    EAST
-};
+} // namespace detail
 
-struct Rectangle {
-    Point position;
-    Size size;
-};
+inline bool operator<(const PairDouble& lhs, const PairDouble& rhs){
+    return std::tuple(lhs.x, lhs.y) < std::tuple(rhs.x, rhs.x);
+}
 
-struct Offset {
-    Dimension dx, dy;
+struct Loot{
+    unsigned id;
+    unsigned type;
+    unsigned value;
+    PairDouble pos;
 };
 
 class Road {
@@ -136,19 +137,27 @@ private:
     Offset offset_;
 };
 
+struct LootType{
+    std::optional<std::string> name;
+    std::optional<std::string> file;
+    std::optional<std::string> type;
+    std::optional<unsigned> rotation;
+    std::optional<std::string> color;
+    std::optional<double> scale;
+    std::optional<unsigned> value;
+};
+
 class Dog{
 public:
     using Name = util::Tagged<std::string, Dog>;
-    struct PairDouble{
-        double x = 0;
-        double y = 0;
-    };
     using Position = util::Tagged<PairDouble, Dog>;
     using Speed = util::Tagged<PairDouble, Dog>;
+    using Bag = util::Tagged<std::deque<Loot>, Dog>;
 
     Dog(int id, Name name, Position pos, Speed speed, Direction dir) noexcept
         : id_(id), name_(name)
-        , pos_(pos), speed_(speed), dir_(dir){
+        , pos_(pos), speed_(speed), dir_(dir)
+        , bag_({}){
     }
 
     int GetId() const{
@@ -182,17 +191,37 @@ public:
     Direction GetDirection() const{
         return dir_;
     }
+
+    void CollectItem(Loot loot){
+        (*bag_).emplace_back(std::move(loot));
+    }
+
+    void ClearBag() {
+        //Сделал через accumulate
+        score_ += std::accumulate(
+            bag_->begin(), bag_->end(),
+            0u,
+            [](unsigned sum, const Loot& loot) { return sum + loot.value; }
+        );
+        bag_->clear();
+    }
+
+    const Bag& GetBag() const{
+        return bag_;
+    }
+    
+    unsigned GetScore() const{
+        return score_;
+    }   
 private:
     int id_;
     Name name_;
     Position pos_;
     Speed speed_;
     Direction dir_;
+    Bag bag_;
+    unsigned score_ = 0;
 };
-
-inline bool operator<(const Dog::PairDouble& lhs, const Dog::PairDouble& rhs){
-    return std::tuple(lhs.x, lhs.y) < std::tuple(rhs.x, rhs.x);
-}
 
 class Map {
 public:
@@ -207,6 +236,7 @@ public:
     using ConstRoadIt = std::map<double, const Road&>::const_iterator;
     using Buildings = std::deque<Building>;
     using Offices = std::deque<Office>;
+    using LootTypes = std::deque<LootType>;
 
     Map(Id id, std::string name) noexcept
         : id_(std::move(id))
@@ -222,6 +252,10 @@ public:
     const Roads& GetRoads() const noexcept;
 
     const Offices& GetOffices() const noexcept;
+    
+    const LootTypes& GetLootTypes() const noexcept;
+
+    unsigned GetRandomLootType() const;
 
     void AddRoad(const Road& road);
 
@@ -231,31 +265,52 @@ public:
 
     void AddOffice(Office office);
 
+    void AddLootType(LootType loot_type);
+
     void AddDogSpeed(double new_speed);
 
     double GetDogSpeed() const;
 
+    void AddBagCapacity(unsigned new_cap);
+
+    unsigned GetBagCapacity() const;
+
+    static PairDouble GetFirstPos(const model::Map::Roads& roads);
+
+    static PairDouble GetRandomPos(const model::Map::Roads& roads);
 private:
+    // Новый генератор
+    static unsigned GetRandomNumber(unsigned a, unsigned b) {
+        if (a >= b) {
+            return a;
+        }
+        
+        static thread_local std::minstd_rand rng{ std::random_device{}() };
+        std::uniform_int_distribution<unsigned> dist(a, b - 1);
+        return dist(rng);
+    }
+
     using OfficeIdToIndex = std::unordered_map<Office::Id, size_t, util::TaggedHasher<Office::Id>>;
 
-
-    /* Обработка вертикальных дорог по x координате*/
+    /* Поиск вертикальных дорог по x координате*/
     void FindInVerticals(const Dog::Position& pos, std::vector<const Road*>& roads) const;
 
-    /* Обработка горизонтальных дорог по y координате*/
+    /* Поиск горизонтальных дорог по y координате*/
     void FindInHorizontals(const Dog::Position& pos, std::vector<const Road*>& roads) const;
 
-    static bool CheckBounds(ConstRoadIt it, const Dog::Position& pos);
+    bool CheckBounds(ConstRoadIt it, const Dog::Position& pos) const;
 
     Id id_;
     std::string name_;
     Roads roads_;
     RoadMap road_map_;
     Buildings buildings_;
+    LootTypes loot_types_;
 
     OfficeIdToIndex warehouse_id_to_index_;
     Offices offices_;
     double dog_speed_ = 0;
+    unsigned bag_capacity_ = 0;
 };
 
 class GameSession{
@@ -264,25 +319,22 @@ public:
         : map_(map){
     }
 
-    Dog* AddDog(int id, const Dog::Name& name, 
-                        const Dog::Position& pos, const Dog::Speed& vel, 
-                        Direction dir){
-        dogs_.emplace_back(id, name, pos, vel, dir);
-        return &dogs_.back();
-    }
+    Dog* AddDog(int id, const Dog::Name& name, const Dog::Position& pos, const Dog::Speed& vel, Direction dir);
 
-    const Map* GetMap() const {
-        return map_;
-    }
+    const Map* GetMap() const;
 
-    std::deque<Dog>& GetDogs(){
-        return dogs_;
-    }
+    std::deque<Dog>& GetDogs();
 
-    const std::deque<Dog>& GetDogs() const{
-        return static_cast<const std::deque<Dog>&>(dogs_);
-    }
+    const std::deque<Dog>& GetDogs() const;
+
+    void UpdateLoot(unsigned loot_count);
+
+    const std::deque<Loot>& GetLootObjects() const;
+
+    void DeleteCollectedLoot(std::set<size_t> collected_items);
 private:
+    unsigned auto_loot_counter_ = 0;
+    std::deque<Loot> loot_;
     std::deque<Dog> dogs_;
     const Map* map_;
 };
@@ -293,17 +345,27 @@ public:
 
     void AddMap(Map&& map);
 
-    GameSession* AddSession(const Map::Id& mapId);
+    GameSession* AddSession(const Map::Id& map_id);
 
-    GameSession* SessionIsExists(const Map::Id& mapId);
+    GameSession* SessionIsExists(const Map::Id& map_id);
+
+    void SetLootGenerator(double period, double probability);
 
     void SetDefaultDogSpeed(double new_speed);
 
     double GetDefaultDogSpeed() const;
 
+    void SetDefaultBagCapacity(unsigned new_cap);
+
+    unsigned GetDefaultBagCapacity() const;
+
     const Maps& GetMaps() const noexcept;
 
     const Map* FindMap(const Map::Id& id) const noexcept;
+
+    detail::Milliseconds GetLootGeneratePeriod() const;
+
+    void GenerateLootInSessions(detail::Milliseconds delta);
 
     void UpdateGameState(double delta);
 private:
@@ -311,7 +373,9 @@ private:
 
     void UpdateDogPos(Dog& dog, const std::vector<const Road*>& roads, double delta);
 
-    static bool IsInsideRoad(const Dog::PairDouble& getting_pos, const Point& start, const Point& end);
+    void UpdateDogsLoot(GameSession& session, double delta);
+
+    static bool IsInsideRoad(const PairDouble& getting_pos, const Point& start, const Point& end);
 
     using MapIdHasher = util::TaggedHasher<Map::Id>;
     using MapIdToIndex = std::unordered_map<Map::Id, size_t, MapIdHasher>;
@@ -320,7 +384,9 @@ private:
     Maps maps_;
     SessionsByMapId map_id_to_sessions_;
     MapIdToIndex map_id_to_index_;
+    std::optional<loot_gen::LootGenerator> loot_generator_;
     double default_dog_speed_ = 1.0;
+    double default_bag_capacity_ = 3;
     static constexpr double road_offset_ = 0.4;
 };
 

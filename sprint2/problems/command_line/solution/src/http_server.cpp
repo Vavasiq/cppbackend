@@ -71,5 +71,5 @@ template void SessionBase::OnWrite<StringBody, Fields>(
 
 template void SessionBase::OnWrite<FileBody, Fields>(
     std::shared_ptr<http::response<FileBody, Fields>>, beast::error_code, std::size_t);
-
+    
 }  // namespace http_server

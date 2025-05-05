@@ -18,6 +18,8 @@ void AddBuildingsFromJson(const json::object& json_map, Map& map);
 
 void AddOfficesFromJson(const json::object& json_map, Map& map);
 
+void AddLootTypesFromJson(const json::object& json_map, Map& map);
+
 void LoadConfig(std::string json_str, Game& game);
 
 void AddMaps(const json::array& json_maps, Game& game);

@@ -7,6 +7,7 @@ size_t DogMapKeyHasher::operator()(const DogMapKey& value) const{
     constexpr size_t kNum = 37;
     size_t h1 = static_cast<size_t>(value.first);
     size_t h2 = util::TaggedHasher<model::Map::Id>()(value.second);
+
     return h1 * kNum + h2 * kNum * kNum;
 }
 
@@ -44,6 +45,7 @@ const Players::PlayerList& Players::GetPlayers() const{
 Token PlayerTokens::AddPlayer(Player& player){
     auto [it, is_emplaced] = token_to_player_.emplace(GenerateToken(), &player);
     if(is_emplaced){
+        players_by_session_[player.GetSession()].push_back(it->second);
         return it->first;
     }
 
@@ -55,6 +57,14 @@ Player* PlayerTokens::FindPlayerByToken(const Token& token){
         return token_to_player_.at(token);
     } 
     return nullptr;
+}
+
+const PlayerTokens::PlayersInSession& PlayerTokens::GetPlayersBySession(const GameSession* session) const{
+    if(players_by_session_.contains(session)){
+        return players_by_session_.at(session);
+    } 
+
+    throw std::logic_error("Session is not exists");
 }
 
 const Player* PlayerTokens::FindPlayerByToken(const Token& token) const{

@@ -6,9 +6,124 @@
 namespace model {
 using namespace std::literals;
 
-namespace {
-    constexpr double kRoadOffset = 0.4;
+namespace detail{
+
+using namespace collision_detector;
+/*
+    Класс, предоставляющий всех собак и потерянных объектов
+    в сессии для обработки коллизий
+
+    Предметы — ширина ноль,
+    Игроки — ширина 0,6,
+    Базы — ширина 0,5.
+*/
+
+static const double LOOT_WIDTH = 0;
+static const double DOG_WIDTH = 0.6;
+static const double OFFICE_WIDTH = 0.5;
+
+class ObjectsAndDogsProvider : public ItemGathererProvider{
+public:
+    using Objects = std::vector<Item>;
+    using Dogs = std::vector<Gatherer>;
+
+    ObjectsAndDogsProvider(Objects objects, Dogs dogs)
+    : objects_(std::move(objects)), dogs_(std::move(dogs)){}
+
+    size_t ItemsCount() const override{
+        return objects_.size();
+    }
+
+    Item GetItem(size_t idx) const override{
+        return objects_[idx];
+    }
+
+    size_t GatherersCount() const override{
+        return dogs_.size();
+    }
+
+    Gatherer GetGatherer(size_t idx) const override{
+        return dogs_[idx];
+    }
+private:
+    Objects objects_;
+    Dogs dogs_;
+};
+
+ObjectsAndDogsProvider::Objects MakeLoot(const std::deque<Loot>& loots){
+    ObjectsAndDogsProvider::Objects result;
+
+    for(const Loot& loot : loots){
+        result.emplace_back(loot.pos, LOOT_WIDTH);
+    }
+
+    return result;
 }
+
+ObjectsAndDogsProvider::Objects MakeOffices(const std::deque<Office>& offices){
+    ObjectsAndDogsProvider::Objects result;
+
+    for(const Office& office : offices){
+        Point2D pos = {
+            static_cast<double>(office.GetPosition().x), 
+            static_cast<double>(office.GetPosition().y)
+        };
+        result.emplace_back(pos, OFFICE_WIDTH);
+    }
+
+    return result;
+}
+
+ObjectsAndDogsProvider::Dogs MakeDogs(const std::deque<Dog>& dogs, double delta){
+    ObjectsAndDogsProvider::Dogs result;
+
+    for(const Dog& dog : dogs){
+        PairDouble speed = *(dog.GetSpeed());
+
+        Point2D start_pos = *(dog.GetPosition());
+        Point2D end_pos = {start_pos.x + speed.x * delta, start_pos.y + speed.y * delta};
+
+        result.emplace_back(start_pos, end_pos, DOG_WIDTH);
+    }
+
+    return result;
+}
+
+enum class GatheringEventType{
+    DOG_COLLECT_ITEM,
+    DOG_DELIVER_ALL_ITEMS
+};
+
+/*
+    Смешивает события столкновений в хронологическом порядке
+*/
+using Event = std::pair<GatheringEvent, GatheringEventType>;
+std::vector<Event> MixEvents(std::vector<GatheringEvent> collectings, std::vector<GatheringEvent> deliverings){
+    std::vector<Event> result;
+    size_t collectings_count = collectings.size();
+    size_t deliverings_count = deliverings.size();
+    
+    result.resize(collectings_count + deliverings_count);
+
+    /* Сначала размещаем все события, относящиеся к подбору объекта*/
+    std::transform(collectings.cbegin(), collectings.cend(), result.begin(), [](const GatheringEvent& event){
+        return Event{event, GatheringEventType::DOG_COLLECT_ITEM};
+    });
+
+    /* Потом размещаем события, в которым относит все объекты */
+    std::transform(deliverings.cbegin(), deliverings.cend(), result.begin() + collectings_count , [](const GatheringEvent& event){
+        return Event{event, GatheringEventType::DOG_DELIVER_ALL_ITEMS};
+    });
+
+    /* Сортируем в хронологическом порядке */
+    std::sort(result.begin(), result.end(),[](const Event& lhs, const Event& rhs){
+        return lhs.first.time < rhs.first.time;
+    });
+
+    return result;
+}
+
+} // namespace detail
 
 /* ------------------------ Map ----------------------------------- */
 
@@ -30,6 +145,14 @@ const Map::Roads& Map::GetRoads() const noexcept {
 
 const Map::Offices& Map::GetOffices() const noexcept {
     return offices_;
+}
+
+const Map::LootTypes& Map::GetLootTypes() const noexcept{
+    return loot_types_;
+}
+
+unsigned Map::GetRandomLootType() const{
+    return GetRandomNumber(0, loot_types_.size());
 }
 
 void Map::AddRoad(const Road& road) {
@@ -70,12 +193,45 @@ void Map::AddOffice(Office office) {
     }
 }
 
+void Map::AddLootType(LootType loot_type){
+    loot_types_.emplace_back(std::move(loot_type));
+}
+
 void Map::AddDogSpeed(double new_speed){
     dog_speed_ = new_speed;
 }
 
 double Map::GetDogSpeed() const{
     return dog_speed_;
+}
+
+void Map::AddBagCapacity(unsigned new_cap){
+    bag_capacity_ = new_cap;
+}
+
+unsigned Map::GetBagCapacity() const{
+    return bag_capacity_;
+}
+
+PairDouble Map::GetFirstPos(const model::Map::Roads& roads){
+    const Point& pos = roads.begin()->GetStart();
+    return {static_cast<double>(pos.x), static_cast<double>(pos.y)};
+}
+
+PairDouble Map::GetRandomPos(const model::Map::Roads& roads){
+    model::Map::RoadTag tag = model::Map::RoadTag(GetRandomNumber(0, 2));
+    size_t road_index = GetRandomNumber(0, roads.size());
+    const model::Road& road = *(roads.begin());
+    double x = 0;
+    double y = 0;
+    if(road.IsHorizontal()){
+        x = GetRandomNumber(road.GetStart().x, road.GetEnd().x);
+        y = road.GetStart().y;
+    } else if(road.IsVertical()){
+        x = road.GetStart().x;
+        y = GetRandomNumber(road.GetStart().y, road.GetEnd().y);
+    }
+    return {x,y};
 }
 
 void Map::FindInVerticals(const Dog::Position& pos, std::vector<const Road*>& roads) const{
@@ -124,14 +280,59 @@ void Map::FindInHorizontals(const Dog::Position& pos, std::vector<const Road*>& 
     }
 }
 
-bool Map::CheckBounds(ConstRoadIt it, const Dog::Position& pos){
+bool Map::CheckBounds(ConstRoadIt it, const Dog::Position& pos) const{
     Point start = it->second.GetStart();
     Point end = it->second.GetEnd();
     if(it->second.IsInvert()){
         std::swap(start, end);
     }
-    return ((start.x - kRoadOffset <= (*pos).x && (*pos).x <= end.x + kRoadOffset) && 
-                (start.y - kRoadOffset <= (*pos).y && (*pos).y <= end.y + kRoadOffset));
+    return ((start.x - 0.4 <= (*pos).x && (*pos).x <= end.x + 0.4) && 
+                (start.y - 0.4 <= (*pos).y && (*pos).y <= end.y + 0.4));
+}
+/* ------------------------ GameSession ----------------------------------- */
+
+Dog* GameSession::AddDog(int id, const Dog::Name& name, 
+                    const Dog::Position& pos, const Dog::Speed& vel, 
+                    Direction dir){
+    dogs_.emplace_back(id, name, pos, vel, dir);
+    return &dogs_.back();
+}
+
+const Map* GameSession::GetMap() const {
+    return map_;
+}
+
+std::deque<Dog>& GameSession::GetDogs(){
+    return dogs_;
+}
+
+const std::deque<Dog>& GameSession::GetDogs() const{
+    return static_cast<const std::deque<Dog>&>(dogs_);
+}
+
+void GameSession::UpdateLoot(unsigned loot_count){
+    for(unsigned i = 0; i < loot_count; ++i){
+        unsigned type = map_->GetRandomLootType();
+        PairDouble pos = Map::GetRandomPos(map_->GetRoads());
+        unsigned value = 1;
+
+        const LootType& loot_type = map_->GetLootTypes().at(type);
+        if(loot_type.value.has_value()){
+            value = map_->GetLootTypes().at(type).value.value();
+        }
+        loot_.emplace_back(++auto_loot_counter_, type, value, pos);
+    }
+}
+
+const std::deque<Loot>& GameSession::GetLootObjects() const{
+    return loot_;
+}
+
+void GameSession::DeleteCollectedLoot(std::set<size_t> collected_items){
+    for(size_t loot_id : collected_items){
+        auto it = std::next(loot_.begin(), loot_id);
+        loot_.erase(it);
+    }
 }
 
 /* ------------------------ Game ----------------------------------- */
@@ -150,22 +351,26 @@ void Game::AddMap(Map&& map) {
     }
 }
 
-GameSession* Game::AddSession(const Map::Id& mapId){
-    if(const Map* map = FindMap(mapId); map != nullptr){
-        GameSession* session = &(map_id_to_sessions_[mapId].emplace_back(map));
+GameSession* Game::AddSession(const Map::Id& map_id){
+    if(const Map* map = FindMap(map_id); map != nullptr){
+        GameSession* session = &(map_id_to_sessions_[map_id].emplace_back(map));
         return session;
     }
     return nullptr;
 }
 
-GameSession* Game::SessionIsExists(const Map::Id& mapId){
-    if(const Map* map = FindMap(mapId); map != nullptr){
-        if(!map_id_to_sessions_[mapId].empty()){
-            GameSession* session = &(map_id_to_sessions_[mapId].back());
+GameSession* Game::SessionIsExists(const Map::Id& map_id){
+    if(const Map* map = FindMap(map_id); map != nullptr){
+        if(!map_id_to_sessions_[map_id].empty()){
+            GameSession* session = &(map_id_to_sessions_[map_id].back());
             return session;
         }
     }
     return nullptr;
+}
+
+void Game::SetLootGenerator(double period, double probability){
+    loot_generator_.emplace(detail::FromDouble(period), probability);
 }
 
 void Game::SetDefaultDogSpeed(double new_speed){
@@ -174,6 +379,14 @@ void Game::SetDefaultDogSpeed(double new_speed){
 
 double Game::GetDefaultDogSpeed() const{
     return default_dog_speed_;
+}
+
+void Game::SetDefaultBagCapacity(unsigned new_cap){
+    default_bag_capacity_ = new_cap;
+}
+
+unsigned Game::GetDefaultBagCapacity() const{
+    return default_bag_capacity_;
 }
 
 const Game::Maps& Game::GetMaps() const noexcept {
@@ -187,9 +400,24 @@ const Map* Game::FindMap(const Map::Id& id) const noexcept {
     return nullptr;
 }
 
+detail::Milliseconds Game::GetLootGeneratePeriod() const{
+    return loot_generator_.value().GetPeriod();
+}
+
+void Game::GenerateLootInSessions(detail::Milliseconds delta){
+    for(auto& [map_id, sessions] : map_id_to_sessions_){
+        for(GameSession& session : sessions){
+            unsigned current_loot_count = session.GetLootObjects().size();
+            unsigned loot_count = (*loot_generator_).Generate(delta, current_loot_count, session.GetDogs().size());
+            session.UpdateLoot(loot_count);
+        }
+    }
+}
+
 void Game::UpdateGameState(double delta){
     for(auto& [map_id, sessions] : map_id_to_sessions_){
         for(GameSession& session : sessions){
+            UpdateDogsLoot(session, delta);
             UpdateAllDogsPositions(session.GetDogs(), session.GetMap(), delta);
         }
     }
@@ -206,13 +434,13 @@ void Game::UpdateDogPos(Dog& dog, const std::vector<const Road*>& roads, double 
     const auto [x, y] = *(dog.GetPosition());
     const auto [vx, vy] = *(dog.GetSpeed());
 
-    const Dog::PairDouble getting_pos({x + vx * delta, y + vy * delta});
-    const Dog::PairDouble getting_speed({vx, vy});
+    const PairDouble getting_pos({x + vx * delta, y + vy * delta});
+    const PairDouble getting_speed({vx, vy});
 
-    Dog::PairDouble result_pos(getting_pos);
-    Dog::PairDouble result_speed(getting_speed);
+    PairDouble result_pos(getting_pos);
+    PairDouble result_speed(getting_speed);
 
-    std::set<Dog::PairDouble> collisions;
+    std::set<PairDouble> collisions;
 
     for(const Road* road : roads){
         Point start = road->GetStart();
@@ -228,16 +456,16 @@ void Game::UpdateDogPos(Dog& dog, const std::vector<const Road*>& roads, double 
             return;
         }
 
-        if(start.x - kRoadOffset >= getting_pos.x) {
-            result_pos.x = start.x - kRoadOffset;
-        } else if(getting_pos.x >= end.x + kRoadOffset){
-            result_pos.x = end.x + kRoadOffset;
+        if(start.x - 0.4 >= getting_pos.x) {
+            result_pos.x = start.x - 0.4;
+        } else if(getting_pos.x >= end.x + 0.4){
+            result_pos.x = end.x + 0.4;
         }
 
-        if(start.y - kRoadOffset >= getting_pos.y) {
-            result_pos.y = start.y - kRoadOffset;
-        } else if(getting_pos.y >= end.y + kRoadOffset){
-            result_pos.y = end.y + kRoadOffset;
+        if(start.y - 0.4 >= getting_pos.y) {
+            result_pos.y = start.y - 0.4;
+        } else if(getting_pos.y >= end.y + 0.4){
+            result_pos.y = end.y + 0.4;
         }
 
         collisions.insert(result_pos);
@@ -252,7 +480,48 @@ void Game::UpdateDogPos(Dog& dog, const std::vector<const Road*>& roads, double 
     dog.SetSpeed(Dog::Speed(result_speed));
 }   
 
-bool Game::IsInsideRoad(const Dog::PairDouble& getting_pos, const Point& start, const Point& end){
+void Game::UpdateDogsLoot(GameSession& session, double delta) {
+    using namespace collision_detector;
+    std::deque<Dog>& dogs = session.GetDogs();
+    const std::deque<Loot>& all_loots = session.GetLootObjects();
+    unsigned max_bag_capacity = session.GetMap()->GetBagCapacity();
+    const std::deque<Office>& offices = session.GetMap()->GetOffices();
+
+    /* Провайдер для предоставления событий при подборе предметов*/
+    detail::ObjectsAndDogsProvider loots_provider(detail::MakeLoot(all_loots), detail::MakeDogs(dogs, delta));
+
+    /* Провайдер для предоставления событий при доставке в офис */
+    detail::ObjectsAndDogsProvider offices_provider(detail::MakeOffices(offices), detail::MakeDogs(dogs, delta));
+    auto events = detail::MixEvents(FindGatherEvents(loots_provider), FindGatherEvents(offices_provider));
+    std::set<size_t> collected_loot;
+    for(const auto& [event, event_type] : events){
+        Dog& dog = dogs[event.gatherer_id];
+        switch (event_type){
+            case detail::GatheringEventType::DOG_COLLECT_ITEM:
+                // Собака подбирает предмет
+                // если её рюкзак не полон
+                if((*dog.GetBag()).size() < max_bag_capacity){
+                    // если до этого этот предмет не подбирали
+                    if(!collected_loot.count(event.item_id)){
+                        dog.CollectItem(all_loots[event.item_id]);
+                        collected_loot.insert(event.item_id);
+                    }
+                }
+                break;
+            case detail::GatheringEventType::DOG_DELIVER_ALL_ITEMS:
+                dog.ClearBag();
+                break;
+        
+            default:
+                break;
+        }
+    }
+
+    /* Подобранные предметы должны пропасть с карты*/
+    session.DeleteCollectedLoot(std::move(collected_loot));
+}
+
+bool Game::IsInsideRoad(const PairDouble& getting_pos, const Point& start, const Point& end){
     bool in_left_border = getting_pos.x >= start.x - road_offset_;
     bool in_right_border = getting_pos.x <= end.x + road_offset_;
     bool in_upper_border = getting_pos.y >= start.y - road_offset_;
