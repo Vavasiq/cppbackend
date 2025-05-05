@@ -198,14 +198,13 @@ public:
     }
 
     void ClearBag() {
-        //Сделал через accumulate
         score_ += std::accumulate(
-            bag_.value.begin(), bag_.value.end(),
-            0u,
-            [](unsigned sum, const Loot& loot) { return sum + loot.value; }
+            bag_->begin(), bag_->end(), 0u,
+            [](unsigned sum, const Loot& loot){ return sum + loot.value; }
         );
-       bag_.value.clear();
+        bag_->resize(0);
     }
+
 
     const Bag& GetBag() const{
         return bag_;
