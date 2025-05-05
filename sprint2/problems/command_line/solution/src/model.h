@@ -9,6 +9,7 @@
 #include <iostream>
 #include <optional>
 #include <numeric>
+#include <random>
 
 #include "geom.h"
 #include "tagged.h"
@@ -199,11 +200,11 @@ public:
     void ClearBag() {
         //Сделал через accumulate
         score_ += std::accumulate(
-            bag_->begin(), bag_->end(),
+            bag_.value.begin(), bag_.value.end(),
             0u,
             [](unsigned sum, const Loot& loot) { return sum + loot.value; }
         );
-        bag_->clear();
+       bag_.value.clear();
     }
 
     const Bag& GetBag() const{
