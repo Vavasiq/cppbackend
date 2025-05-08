@@ -16,48 +16,53 @@ using namespace model;
 
 class GetMapUseCase{
 public:
-    static std::string MakeMapDescription(const model::Map* map);
+    static std::string MakeMapDescription(const Map* map);
 private:
-    static json::array GetRoadsInJSON(const model::Map::Roads& roads);
-    static json::array GetBuildingsInJSON(const model::Map::Buildings& buildings);
-    static json::array GetOfficesInJSON(const model::Map::Offices& offices);
+    static json::array GetRoadsInJSON(const Map::Roads& roads);
+    static json::array GetBuildingsInJSON(const Map::Buildings& buildings);
+    static json::array GetOfficesInJSON(const Map::Offices& offices);
+    static json::array GetLootTypesInJSON(const Map::LootTypes& loot_types);
 };
 
 class ListMapsUseCase{
 public:
-    static std::string MakeMapsList(const model::Game::Maps& maps);
+    static std::string MakeMapsList(const Game::Maps& maps);
 };
 
 class GameUseCase{
 public:
-    GameUseCase(model::Players& players, model::PlayerTokens& tokens)
+    GameUseCase(Players& players, PlayerTokens& tokens)
         : players_(players), tokens_(tokens){}
 
     std::string JoinGame(const std::string& user_name, const std::string& str_map_id, 
-                            model::Game& game, bool random_spawn);
+                            Game& game, bool is_random_spawn_enabled);
 
-    std::string GetGameState() const;
+    std::string GetGameState(const Token& token) const;
 
-    std::string SetAction(const json::object& action, const model::Token& token);
+    std::string SetAction(const json::object& action, const Token& token);
 
-    std::string IncreaseTime(double delta, model::Game& game);
+    static std::string IncreaseTime(double delta, Game& game);
+
+    static void GenerateLoot(detail::Milliseconds delta, Game& game);
 private:
-    static model::Dog::Position GetFirstPos(const model::Map::Roads& roads);
-    static model::Dog::Position GetRandomPos(const model::Map::Roads& roads);
+    static json::array GetBagItems(const Dog::Bag& bag_items);
+    static json::object GetPlayers(const PlayerTokens::PlayersInSession& players_in_session);
+    static json::object GetLostObjects(const std::deque<Loot>& loots);
+
     int auto_counter_ = 0;
-    model::Players& players_;
-    model::PlayerTokens& tokens_;
+    Players& players_;
+    PlayerTokens& tokens_;
 };
 
 class ListPlayersUseCase{
 public:
-    static std::string GetPlayersInJSON(const model::Players::PlayerList& players);
+    static std::string GetPlayersInJSON(const PlayerTokens::PlayersInSession& players);
 };
 /* --------------------------- Application -------------------------------- */
 
 class Application{
 public:
-    Application(model::Game& game, bool periodic_mode, bool randomize_spawn_points)
+    Application(Game& game, bool periodic_mode, bool randomize_spawn_points)
         : 
         game_(game), periodic_mode_(periodic_mode), 
         rand_spawn_(randomize_spawn_points), players_(), tokens_(), 
@@ -71,7 +76,7 @@ public:
         return game_.FindMap(map_id);
     }
 
-    const Player* FindPlayerByToken(const model::Token& token) const{
+    const Player* FindPlayerByToken(const Token& token) const{
         return tokens_.FindPlayerByToken(token);
     }
 
@@ -79,7 +84,7 @@ public:
         return periodic_mode_;
     }
 
-    std::string GetMapDescription(const model::Map* map) const{
+    std::string GetMapDescription(const Map* map) const{
         return GetMapUseCase::MakeMapDescription(map);
     }
 
@@ -87,27 +92,33 @@ public:
         return game_handler_.JoinGame(user_name, map_id, game_, rand_spawn_);
     }
 
-    std::string GetPlayerList() const{
-        return ListPlayersUseCase::GetPlayersInJSON(players_.GetPlayers());
+    std::string GetPlayerList(const Token& token) const{
+        const GameSession* session = tokens_.FindPlayerByToken(token)->GetSession();
+        PlayerTokens::PlayersInSession players = tokens_.GetPlayersBySession(session);
+        return ListPlayersUseCase::GetPlayersInJSON(players);
     }
 
-    std::string GetGameState() const{
-        return game_handler_.GetGameState();
+    std::string GetGameState(const Token& token) const{
+        return game_handler_.GetGameState(token);
     }
 
     std::string IncreaseTime(double delta){
         return game_handler_.IncreaseTime(delta, game_);
     }
 
-    std::string ApplyPlayerAction(const json::object& action, const model::Token& token){
+    void GenerateLoot(detail::Milliseconds delta){
+        return game_handler_.GenerateLoot(delta, game_);
+    }
+
+    std::string ApplyPlayerAction(const json::object& action, const Token& token){
         return game_handler_.SetAction(action, token);
     }
 private:
-    model::Game& game_;
+    Game& game_;
     bool periodic_mode_;
     bool rand_spawn_;
-    model::Players players_;
-    model::PlayerTokens tokens_; 
+    Players players_;
+    PlayerTokens tokens_; 
     GameUseCase game_handler_;
 };
 

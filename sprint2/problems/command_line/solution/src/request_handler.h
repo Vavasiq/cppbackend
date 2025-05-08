@@ -21,7 +21,6 @@ namespace http = beast::http;
 namespace fs = std::filesystem;
 namespace json = boost::json;
 using Strand = net::strand<net::io_context::executor_type>;
-using Milliseconds = std::chrono::milliseconds;
 using namespace std::literals;
 
 namespace detail{
@@ -47,14 +46,13 @@ std::string MakeErrorCode(std::string_view code, std::string_view message);
 
 bool IsMatched(const std::string& str, std::string reg_expression);
 
-Milliseconds FromDouble(double delta);
-
 /* ------------------------ Ticker ----------------------------------- */
 
 class Ticker : public std::enable_shared_from_this<Ticker> {
 public:
+    using Milliseconds = model::detail::Milliseconds;
     using Handler = std::function<void(Milliseconds delta)>;
-
+    
     // Функция handler будет вызываться внутри strand с интервалом period
     Ticker(Strand& strand, Milliseconds period, Handler handler)
         : strand_{strand}
@@ -151,9 +149,9 @@ public:
     StringResponse MakeApiResponse(Request&& req){
         std::string target = std::string(req.target());
         if(detail::IsMatched(target, "(/api/v1/maps)"s)){
-            return MakeMapsListsResponse(req.version());
+            return MakeMapsListsResponse(req);
         } else if(detail::IsMatched(target, "(/api/v1/maps/).+"s)) {
-            return MakeMapDescResponse(target, req.version());
+            return MakeMapDescResponse(req);
         } else if(detail::IsMatched(target, "(/api/v1/game/).*"s)){
             if(detail::IsMatched(target, "(/api/v1/game/join)"s)){
                 return MakeAuthResponse(req);
@@ -172,13 +170,21 @@ public:
     }
 private:
     explicit ApiHandler(model::Game& game, Strand api_strand, std::optional<double> tick_period, bool randomize_spawn_points )
-        : app_(game, tick_period.has_value(), randomize_spawn_points),  api_strand_{api_strand}, ticker_(){
+        : app_(game, tick_period.has_value(), randomize_spawn_points),  api_strand_{api_strand}, ticker_(), loot_ticker_(){
+            app_.GenerateLoot(model::detail::Milliseconds{0});
+
             if(tick_period.has_value()){
-                ticker_ = std::make_shared<detail::Ticker>(api_strand_, detail::FromDouble(*tick_period), [this](Milliseconds delta){
+                ticker_ = std::make_shared<detail::Ticker>(api_strand_, model::detail::FromDouble(*tick_period), [this](model::detail::Milliseconds delta){
                     this->app_.IncreaseTime(delta.count() / 1000);
                 });
 
                 ticker_->Start();
+
+                loot_ticker_ = std::make_shared<detail::Ticker>(api_strand_, game.GetLootGeneratePeriod(), [this](model::detail::Milliseconds delta){
+                    this->app_.GenerateLoot(delta);
+                });
+
+                loot_ticker_->Start();
             }
         }
 
@@ -209,9 +215,54 @@ private:
         std::cout << " "sv << res.body() << std::endl;
     }
 
-    StringResponse MakeMapsListsResponse(unsigned version);
+    template<typename Request>
+    StringResponse MakeMapsListsResponse(Request&& req){
+        using namespace std::literals;
 
-    StringResponse MakeMapDescResponse(const std::string& req_target, unsigned req_version);
+        SetMethods methods("GET", "HEAD");
+        std::string method = std::string(req.method_string());
+        if(methods.IsSame(method)){
+            std::string body = app_.GetMapsList();
+            return MakeResponse(http::status::ok, body, 
+                                        req.version(), body.size(), "application/json"s);
+        } else{
+            auto res =  MakeErrorResponse(http::status::method_not_allowed, 
+                "invalidMethod"sv, "Only GET method is expected"sv, req.version());
+            res.insert("Allow"s, methods.MakeSequence());
+            return res;
+        }
+
+        std::string body = app_.GetMapsList();
+        return MakeResponse(http::status::ok, body, 
+                                        req.version(), body.size(), "application/json"s);
+    }
+
+    template<typename Request>
+    StringResponse MakeMapDescResponse(Request&& req){
+        using namespace std::literals;
+
+        SetMethods methods("GET", "HEAD");
+        std::string method = std::string(req.method_string());
+        if(methods.IsSame(method)){
+            std::string req_target = std::string(req.target());
+            model::Map::Id id(std::string(req_target.substr(13, req_target.npos)));
+            if(auto map = app_.FindMap(id); map){
+                std::string body = app_.GetMapDescription(map);
+                return MakeResponse(http::status::ok, body, 
+                                        req.version(), body.size(), "application/json"s);
+            }
+
+            return MakeErrorResponse(http::status::not_found, 
+                "mapNotFound"sv, "Map not found"sv, req.version());
+        } else {
+            auto res =  MakeErrorResponse(http::status::method_not_allowed, 
+                "invalidMethod"sv, "Only GET method is expected"sv, req.version());
+            res.insert("Allow"s, methods.MakeSequence());
+            return res;
+        }
+
+
+    }
 
     template<typename Request>
     StringResponse MakeAuthResponse(Request&& req){
@@ -241,8 +292,8 @@ private:
                             "mapNotFound"sv, "Map not found"sv, req.version());
                     }
                     /* Запрос без ошибок */
-                    std::string join_response = app_.GetJoinGameResult(user_name, map_id);
-                    return MakeResponse(http::status::ok, join_response, req.version(), join_response.size(), 
+                    std::string body = app_.GetJoinGameResult(user_name, map_id);
+                    return MakeResponse(http::status::ok, body, req.version(), body.size(), 
                         "application/json"s);
                 }
                 return MakeErrorResponse(http::status::bad_request, 
@@ -286,9 +337,9 @@ private:
                 } else {
                     throw std::logic_error("Token is missing");
                 }
-            } catch(const std::exception& ex){
+            } catch(...){
                 return MakeErrorResponse(http::status::unauthorized, 
-                    "invalidToken"sv, ex.what(), req.version());
+                    "invalidToken"sv, "Authorization header is missing"sv, req.version());
             }
         }
 
@@ -301,8 +352,8 @@ private:
     template<typename Request>
     StringResponse MakePlayerListResponse(Request&& req){
         SetMethods available_methods("GET", "HEAD");
-        return ExecuteAuthorized(available_methods, req, [this](Request&& req, [[maybe_unused]] const model::Token& token){
-                std::string body = this->app_.GetPlayerList();
+        return ExecuteAuthorized(available_methods, req, [this](Request&& req, const model::Token& token){
+                std::string body = this->app_.GetPlayerList(token);
                 return this->MakeResponse(http::status::ok, body, req.version(), body.size(), 
                     "application/json"s);
         });
@@ -311,8 +362,8 @@ private:
     template<typename Request>
     StringResponse MakeGameStateResponse(Request&& req){
         SetMethods available_methods("GET", "HEAD");
-        return ExecuteAuthorized(available_methods, req, [this](Request&& req, [[maybe_unused]] const model::Token& token){
-                std::string body = this->app_.GetGameState();
+        return ExecuteAuthorized(available_methods, req, [this](Request&& req, const model::Token& token){
+                std::string body = this->app_.GetGameState(token);
                 return this->MakeResponse(http::status::ok, body, req.version(), body.size(), 
                     "application/json"s);
         });
@@ -360,7 +411,7 @@ private:
                     if(auto it = action.find("move"); it != action.end()){
                         /* Запрос без ошибок */
                         SetMethods available_methods("POST");
-                        return ExecuteAuthorized(available_methods, req, [this, &action](Request&& req, [[maybe_unused]] const model::Token& token){
+                        return ExecuteAuthorized(available_methods, req, [this, &action](Request&& req, const model::Token& token){
                             std::string body = this->app_.ApplyPlayerAction(action, token);
                             return this->MakeResponse(http::status::ok, body, req.version(), body.size(), 
                             "application/json"s);
@@ -384,6 +435,8 @@ private:
     Strand api_strand_;
     app::Application app_;
     std::shared_ptr<detail::Ticker> ticker_;
+    std::shared_ptr<detail::Ticker> loot_ticker_;
+
 };
 
 /* -------------------------- FileHandler --------------------------------- */

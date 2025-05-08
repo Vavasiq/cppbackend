@@ -63,10 +63,6 @@ bool IsMatched(const std::string& str, std::string reg_expression){
     return boost::regex_match(str, boost::regex(reg_expression));
 }
 
-Milliseconds FromDouble(double delta){
-    return std::chrono::duration_cast<Milliseconds>(std::chrono::duration<double>(delta/1000));
-}
-
 /* ------------------------ Ticker ----------------------------------- */
 
 void Ticker::Start() {
@@ -119,30 +115,6 @@ StringResponse BaseHandler::MakeErrorResponse(http::status status, std::string_v
 
     std::string body = detail::MakeErrorCode(code, message);
     return MakeResponse(status, body, version, body.size(), "application/json"s);
-}
-
-/* -------------------------- ApiHandler --------------------------------- */
-
-StringResponse ApiHandler::MakeMapsListsResponse(unsigned version){
-    using namespace std::literals;
-
-    std::string body = app_.GetMapsList();
-    return MakeResponse(http::status::ok, body, 
-                                    version, body.size(), "application/json"s);
-}
-
-StringResponse ApiHandler::MakeMapDescResponse(const std::string& req_target, unsigned req_version){
-    using namespace std::literals;
-
-    model::Map::Id id(std::string(req_target.substr(13, req_target.npos)));
-    if(auto map = app_.FindMap(id); map){
-        std::string body = app_.GetMapDescription(map);
-        return MakeResponse(http::status::ok, body, 
-                                req_version, body.size(), "application/json"s);
-    }
-
-    return MakeErrorResponse(http::status::not_found, 
-        "mapNotFound"sv, "Map not found"sv, req_version);
 }
 
 /* -------------------------- FileHandler --------------------------------- */
